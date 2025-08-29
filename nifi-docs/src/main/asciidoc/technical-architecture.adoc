@@ -1,0 +1,869 @@
+//
+// Licensed to the Apache Software Foundation (ASF) under one or more
+// contributor license agreements.  See the NOTICE file distributed with
+// this work for additional information regarding copyright ownership.
+// The ASF licenses this file to You under the Apache License, Version 2.0
+// (the "License"); you may not use this file except in compliance with
+// the License.  You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+= Apache NiFi Technical Architecture Guide
+Apache NiFi Team <dev@nifi.apache.org>
+:homepage: http://nifi.apache.org
+:linkattrs:
+
+== Introduction
+
+This document provides a comprehensive technical architecture overview of Apache NiFi, including detailed diagrams of system components, data flow patterns, and deployment architectures. The architecture documentation is designed to help developers, system architects, and operations teams understand how NiFi components interact and how to effectively design, deploy, and maintain NiFi-based data flow solutions.
+
+== System Overview Architecture
+
+Apache NiFi is a comprehensive data flow management platform consisting of several interconnected components that work together to provide reliable, scalable, and secure data processing capabilities.
+
+[plantuml, system-overview, svg]
+....
+@startuml
+!define RECTANGLE class
+
+package "Apache NiFi Ecosystem" {
+    package "Core Platform" {
+        RECTANGLE UI as "Web UI"
+        RECTANGLE API as "REST API"
+        RECTANGLE Core as "NiFi Core Engine"
+        RECTANGLE Proc as "Processors"
+        RECTANGLE CS as "Controller Services"
+        RECTANGLE RPG as "Remote Process Groups"
+    }
+    
+    package "Edge Agents" {
+        RECTANGLE MiNiFi as "MiNiFi Agents"
+        RECTANGLE C2 as "C2 Protocol"
+    }
+    
+    package "Management & Control" {
+        RECTANGLE Registry as "NiFi Registry"
+        RECTANGLE Toolkit as "NiFi Toolkit"
+    }
+    
+    package "Data Storage" {
+        RECTANGLE FF as "FlowFile Repository"
+        RECTANGLE CR as "Content Repository"
+        RECTANGLE PR as "Provenance Repository"
+    }
+}
+
+package "External Systems" {
+    RECTANGLE DB as "Databases"
+    RECTANGLE FS as "File Systems"
+    RECTANGLE Queue as "Message Queues"
+    RECTANGLE Cloud as "Cloud Services"
+    RECTANGLE API_Ext as "External APIs"
+}
+
+UI --> API
+API --> Core
+Core --> Proc
+Core --> CS
+Core --> RPG
+Core --> FF
+Core --> CR
+Core --> PR
+
+MiNiFi --> C2
+C2 --> Core
+
+Registry --> UI
+Registry --> API
+
+Proc --> DB
+Proc --> FS
+Proc --> Queue
+Proc --> Cloud
+Proc --> API_Ext
+
+RPG --> MiNiFi
+@enduml
+....
+
+=== Core Components
+
+**NiFi Core Engine**:: The central orchestration layer that manages flow execution, scheduling, and resource allocation.
+
+**Web UI**:: Browser-based interface for designing, monitoring, and managing data flows.
+
+**REST API**:: Programmatic interface for automation and integration with external systems.
+
+**Processors**:: Pluggable components that perform data processing operations.
+
+**Controller Services**:: Shared services that provide common functionality across processors.
+
+**Remote Process Groups**:: Connections to other NiFi instances for distributed processing.
+
+=== Data Management Components
+
+**FlowFile Repository**:: Metadata storage for tracking FlowFiles through the system.
+
+**Content Repository**:: Storage for FlowFile content data.
+
+**Provenance Repository**:: Audit trail and lineage tracking for data processing events.
+
+== Core Framework Architecture
+
+The NiFi core framework is built on a modular architecture that separates concerns and provides clean interfaces between components.
+
+[plantuml, core-framework, svg]
+....
+@startuml
+package "NiFi Framework" {
+    package "Web Layer" {
+        class WebUI as "Web UI"
+        class RestAPI as "REST API"
+        class Auth as "Authentication"
+        class Authz as "Authorization"
+    }
+    
+    package "Controller Layer" {
+        class FC as "Flow Controller"
+        class PM as "Process Manager"
+        class SM as "State Manager"
+        class CM as "Cluster Manager"
+    }
+    
+    package "Processing Layer" {
+        class PE as "Process Engine"
+        class Scheduler as "Process Scheduler"
+        class ConnMgr as "Connection Manager"
+        class QueueMgr as "Queue Manager"
+    }
+    
+    package "Repository Layer" {
+        class FFRepo as "FlowFile Repository"
+        class ContentRepo as "Content Repository"
+        class ProvRepo as "Provenance Repository"
+        class StateRepo as "State Repository"
+    }
+    
+    package "Extension Layer" {
+        class ProcReg as "Processor Registry"
+        class CSReg as "Controller Service Registry"
+        class RPGReg as "Remote Process Group Registry"
+        class NarLoader as "NAR Class Loader"
+    }
+    
+    package "System Layer" {
+        class Bootstrap as "Bootstrap"
+        class Security as "Security Context"
+        class Monitoring as "System Monitoring"
+        class LogMgr as "Log Manager"
+    }
+}
+
+WebUI --> Auth
+WebUI --> RestAPI
+RestAPI --> Authz
+Authz --> FC
+
+FC --> PM
+FC --> SM
+FC --> CM
+
+PM --> PE
+PM --> Scheduler
+PE --> ConnMgr
+PE --> QueueMgr
+
+ConnMgr --> FFRepo
+QueueMgr --> ContentRepo
+PM --> ProvRepo
+SM --> StateRepo
+
+PE --> ProcReg
+PE --> CSReg
+PE --> RPGReg
+ProcReg --> NarLoader
+
+Bootstrap --> Security
+Bootstrap --> Monitoring
+Bootstrap --> LogMgr
+@enduml
+....
+
+=== Framework Layers
+
+**Web Layer**:: Handles user interface and API requests with authentication and authorization.
+
+**Controller Layer**:: Manages overall system state, clustering, and high-level coordination.
+
+**Processing Layer**:: Executes data flow processing and manages scheduling and queuing.
+
+**Repository Layer**:: Provides persistent storage for various types of system data.
+
+**Extension Layer**:: Manages loading and registry of pluggable components.
+
+**System Layer**:: Provides foundational services like security, monitoring, and bootstrapping.
+
+== Data Flow Processing Architecture
+
+NiFi's data flow processing architecture is designed around the concept of FlowFiles, which represent units of data moving through the system.
+
+[plantuml, data-flow-processing, svg]
+....
+@startuml
+package "Data Flow Processing" {
+    package "Input Stage" {
+        component Source as "Data Source"
+        component InputProc as "Input Processor"
+        queue InQueue as "Input Queue"
+    }
+    
+    package "Processing Pipeline" {
+        component Proc1 as "Processor 1"
+        queue Q1 as "Queue 1"
+        component Proc2 as "Processor 2"
+        queue Q2 as "Queue 2"
+        component ProcN as "Processor N"
+        queue QN as "Queue N"
+    }
+    
+    package "Output Stage" {
+        component OutputProc as "Output Processor"
+        queue OutQueue as "Output Queue"
+        component Dest as "Data Destination"
+    }
+    
+    package "FlowFile Lifecycle" {
+        component FF as "FlowFile Creation"
+        component Attr as "Attribute Updates"
+        component Content as "Content Modification"
+        component Routing as "Relationship Routing"
+        component Term as "Termination"
+    }
+    
+    package "Flow Control" {
+        component BP as "Back Pressure"
+        component PQ as "Prioritized Queuing"
+        component LoadBal as "Load Balancing"
+        component ExpPolicy as "Expiration Policy"
+    }
+    
+    package "Monitoring & Provenance" {
+        component Stats as "Statistics Collection"
+        component Prov as "Provenance Events"
+        component Bulletin as "Bulletin Board"
+        component Alerts as "System Alerts"
+    }
+}
+
+Source --> InputProc
+InputProc --> InQueue
+InQueue --> Proc1
+
+Proc1 --> Q1
+Q1 --> Proc2
+Proc2 --> Q2
+Q2 --> ProcN
+ProcN --> QN
+
+QN --> OutputProc
+OutputProc --> OutQueue
+OutQueue --> Dest
+
+InputProc --> FF
+FF --> Attr
+Attr --> Content
+Content --> Routing
+Routing --> Term
+
+Q1 --> BP
+Q2 --> PQ
+QN --> LoadBal
+OutQueue --> ExpPolicy
+
+Proc1 --> Stats
+Proc2 --> Prov
+ProcN --> Bulletin
+Stats --> Alerts
+@enduml
+....
+
+=== FlowFile Processing Concepts
+
+**FlowFile**:: A logical wrapper around content and attributes that flows through the system.
+
+**Attributes**:: Key-value pairs that provide metadata about the FlowFile content.
+
+**Content**:: The actual data payload being processed.
+
+**Relationships**:: Named connections that define how FlowFiles are routed between processors.
+
+**Queues**:: Buffering mechanisms between processors that provide flow control and prioritization.
+
+== Clustering and Scalability Architecture
+
+NiFi supports clustering for high availability and horizontal scaling across multiple nodes.
+
+[plantuml, clustering-architecture, svg]
+....
+@startuml
+package "NiFi Cluster" {
+    package "Cluster Coordinator" {
+        component CC as "Cluster Coordinator"
+        component EM as "Election Manager"
+        component HB as "Heartbeat Monitor"
+        component NC as "Node Coordination"
+    }
+    
+    package "Node 1" {
+        component N1_Core as "NiFi Core"
+        component N1_Proc as "Processors"
+        database N1_Repo as "Repositories"
+        component N1_Web as "Web Interface"
+    }
+    
+    package "Node 2" {
+        component N2_Core as "NiFi Core"
+        component N2_Proc as "Processors"
+        database N2_Repo as "Repositories"
+        component N2_Web as "Web Interface"
+    }
+    
+    package "Node N" {
+        component NN_Core as "NiFi Core"
+        component NN_Proc as "Processors"
+        database NN_Repo as "Repositories"
+        component NN_Web as "Web Interface"
+    }
+    
+    package "Shared Services" {
+        component ZK as "ZooKeeper Cluster"
+        database SharedStorage as "Shared Storage"
+        component LB as "Load Balancer"
+    }
+    
+    package "Data Distribution" {
+        component SM as "Site-to-Site"
+        component RPG as "Remote Process Groups"
+        component Replication as "Data Replication"
+    }
+}
+
+CC --> EM
+CC --> HB
+CC --> NC
+
+CC <--> ZK
+
+NC <--> N1_Core
+NC <--> N2_Core
+NC <--> NN_Core
+
+N1_Core --> N1_Proc
+N1_Core --> N1_Repo
+N1_Core --> N1_Web
+
+N2_Core --> N2_Proc
+N2_Core --> N2_Repo
+N2_Core --> N2_Web
+
+NN_Core --> NN_Proc
+NN_Core --> NN_Repo
+NN_Core --> NN_Web
+
+N1_Repo <--> SharedStorage
+N2_Repo <--> SharedStorage
+NN_Repo <--> SharedStorage
+
+LB --> N1_Web
+LB --> N2_Web
+LB --> NN_Web
+
+N1_Core <--> SM
+N2_Core <--> SM
+NN_Core <--> SM
+
+SM --> RPG
+SM --> Replication
+@enduml
+....
+
+=== Clustering Features
+
+**Automatic Failover**:: Cluster coordinator election and automatic failover for high availability.
+
+**Load Distribution**:: Automatic distribution of processing load across cluster nodes.
+
+**Data Replication**:: Configurable replication of critical data across nodes.
+
+**Site-to-Site Protocol**:: Secure, load-balanced data transfer between cluster nodes and external systems.
+
+== MiNiFi Edge Architecture
+
+MiNiFi provides lightweight edge agents for data collection and initial processing at the source.
+
+[plantuml, minifi-architecture, svg]
+....
+@startuml
+package "Edge Environment" {
+    package "IoT Devices / Sensors" {
+        component Device1 as "Sensor 1"
+        component Device2 as "Sensor 2"
+        component DeviceN as "Device N"
+    }
+    
+    package "MiNiFi Agent" {
+        component MiNiFi_Core as "MiNiFi Core"
+        component Mini_Proc as "Processors"
+        queue Mini_Queue as "Queues"
+        component Mini_Config as "Configuration"
+        component Mini_C2 as "C2 Client"
+    }
+    
+    package "Local Processing" {
+        component Filter as "Data Filtering"
+        component Transform as "Data Transformation"
+        component Enrich as "Data Enrichment"
+        component Compress as "Data Compression"
+    }
+}
+
+package "Command & Control" {
+    component C2Server as "C2 Server"
+    component ConfigMgmt as "Configuration Management"
+    component Monitoring as "Agent Monitoring"
+    component Updates as "Flow Updates"
+}
+
+package "Central NiFi Cluster" {
+    component Gateway as "Site-to-Site Gateway"
+    component MainCluster as "NiFi Cluster"
+    database DataLake as "Data Lake"
+    component Analytics as "Analytics Platform"
+}
+
+Device1 --> MiNiFi_Core
+Device2 --> MiNiFi_Core
+DeviceN --> MiNiFi_Core
+
+MiNiFi_Core --> Mini_Proc
+Mini_Proc --> Mini_Queue
+Mini_Queue --> Filter
+
+Filter --> Transform
+Transform --> Enrich
+Enrich --> Compress
+
+Mini_C2 <--> C2Server
+C2Server --> ConfigMgmt
+C2Server --> Monitoring
+C2Server --> Updates
+
+Compress --> Gateway
+Gateway --> MainCluster
+MainCluster --> DataLake
+MainCluster --> Analytics
+
+Mini_Config <-- Updates
+@enduml
+....
+
+=== Edge Processing Benefits
+
+**Reduced Bandwidth**:: Process and filter data at the edge to reduce network traffic.
+
+**Real-time Processing**:: Immediate processing for time-sensitive data and alerts.
+
+**Offline Capability**:: Continue processing even when connectivity to central systems is lost.
+
+**Centralized Management**:: Remote configuration and monitoring through C2 protocol.
+
+== NiFi Registry Integration Architecture
+
+NiFi Registry provides version control and lifecycle management for data flows.
+
+[plantuml, registry-integration, svg]
+....
+@startuml
+package "Development Environment" {
+    component DevNiFi as "Development NiFi"
+    component DevFlows as "Development Flows"
+    component Testing as "Flow Testing"
+}
+
+package "NiFi Registry" {
+    component Registry as "Registry Core"
+    component VersionControl as "Version Control"
+    database FlowStorage as "Flow Storage"
+    component Metadata as "Flow Metadata"
+    component GitIntegration as "Git Integration"
+    
+    package "Registry Features" {
+        component Versioning as "Flow Versioning"
+        component Branching as "Flow Branching"
+        component Merging as "Flow Merging"
+        component Tagging as "Release Tagging"
+    }
+}
+
+package "Production Environment" {
+    component ProdNiFi as "Production NiFi"
+    component ProdFlows as "Production Flows"
+    component MonitoringProd as "Flow Monitoring"
+}
+
+package "CI/CD Pipeline" {
+    component CI as "Continuous Integration"
+    component Testing_Pipeline as "Automated Testing"
+    component Deployment as "Automated Deployment"
+    component Validation as "Flow Validation"
+}
+
+package "External Systems" {
+    component Git as "Git Repository"
+    component Jenkins as "CI/CD Server"
+    component Nexus as "Artifact Repository"
+}
+
+DevNiFi --> DevFlows
+DevFlows --> Testing
+Testing --> Registry
+
+Registry --> VersionControl
+Registry --> FlowStorage
+Registry --> Metadata
+Registry --> GitIntegration
+
+VersionControl --> Versioning
+VersionControl --> Branching
+VersionControl --> Merging
+VersionControl --> Tagging
+
+Registry --> CI
+CI --> Testing_Pipeline
+Testing_Pipeline --> Deployment
+Deployment --> Validation
+
+Validation --> ProdNiFi
+ProdNiFi --> ProdFlows
+ProdFlows --> MonitoringProd
+
+GitIntegration --> Git
+CI --> Jenkins
+Deployment --> Nexus
+@enduml
+....
+
+=== Registry Capabilities
+
+**Version Control**:: Track changes to data flows with full version history.
+
+**Collaboration**:: Multiple developers can work on flows with branching and merging.
+
+**Deployment Automation**:: Automated promotion of flows from development to production.
+
+**Change Management**:: Controlled release processes with approval workflows.
+
+== Security Architecture
+
+NiFi implements comprehensive security measures across all system components.
+
+[plantuml, security-architecture, svg]
+....
+@startuml
+package "Security Layers" {
+    package "Network Security" {
+        component TLS as "TLS/SSL Encryption"
+        component Certificates as "Certificate Management"
+        component Firewall as "Network Firewall"
+        component VPN as "VPN Connectivity"
+    }
+    
+    package "Authentication" {
+        component LDAP as "LDAP/Active Directory"
+        component OIDC as "OpenID Connect"
+        component SAML as "SAML 2.0"
+        component Kerberos as "Kerberos"
+        component X509 as "X.509 Certificates"
+    }
+    
+    package "Authorization" {
+        component RBAC as "Role-Based Access Control"
+        component Policies as "Access Policies"
+        component ResourceAuth as "Resource Authorization"
+        component DataAuth as "Data Authorization"
+    }
+    
+    package "Data Protection" {
+        component Encryption as "Data Encryption"
+        component KeyMgmt as "Key Management"
+        component SensitiveProps as "Sensitive Properties"
+        component Masking as "Data Masking"
+    }
+    
+    package "Audit & Compliance" {
+        component AuditLogs as "Audit Logging"
+        component Provenance as "Data Provenance"
+        component Compliance as "Compliance Reporting"
+        component MonitoringSec as "Security Monitoring"
+    }
+}
+
+package "External Security Services" {
+    component HSM as "Hardware Security Module"
+    component Vault as "HashiCorp Vault"
+    component PKI as "PKI Infrastructure"
+    component SIEM as "SIEM System"
+}
+
+TLS --> Certificates
+Certificates --> PKI
+
+LDAP --> RBAC
+OIDC --> RBAC
+SAML --> RBAC
+Kerberos --> RBAC
+X509 --> RBAC
+
+RBAC --> Policies
+Policies --> ResourceAuth
+Policies --> DataAuth
+
+Encryption --> KeyMgmt
+KeyMgmt --> HSM
+KeyMgmt --> Vault
+SensitiveProps --> Encryption
+
+AuditLogs --> SIEM
+Provenance --> Compliance
+MonitoringSec --> SIEM
+@enduml
+....
+
+=== Security Features
+
+**Multi-layered Security**:: Defense in depth with multiple security layers.
+
+**Identity Integration**:: Support for enterprise identity systems and standards.
+
+**Fine-grained Authorization**:: Granular access control at component and data levels.
+
+**Data Protection**:: Encryption at rest and in transit with secure key management.
+
+**Comprehensive Auditing**:: Complete audit trail for compliance and security monitoring.
+
+== Extension Architecture
+
+NiFi's extension architecture allows for pluggable components and custom functionality.
+
+[plantuml, extension-architecture, svg]
+....
+@startuml
+package "NiFi Extension Framework" {
+    package "Core Framework" {
+        component ExtRegistry as "Extension Registry"
+        component ClassLoader as "NAR Class Loader"
+        component APILayer as "Extension API Layer"
+        component Lifecycle as "Component Lifecycle"
+    }
+    
+    package "Extension Types" {
+        component Processors as "Processors"
+        component ControllerServices as "Controller Services"
+        component ReportingTasks as "Reporting Tasks"
+        component Authorizers as "Authorizers"
+        component LoginProviders as "Login Identity Providers"
+    }
+    
+    package "NAR Packaging" {
+        artifact NARFile as "NAR Archive"
+        component Dependencies as "Dependencies"
+        component ServiceDef as "Service Definition"
+        component Documentation as "Component Documentation"
+    }
+    
+    package "Development Tools" {
+        component Archetypes as "Maven Archetypes"
+        component DevFramework as "Development Framework"
+        component TestFramework as "Testing Framework"
+        component DocGeneration as "Documentation Generation"
+    }
+}
+
+package "Extension Development" {
+    component CustomProc as "Custom Processors"
+    component CustomServices as "Custom Services"
+    component ThirdPartyInteg as "Third-party Integrations"
+    component DomainSpecific as "Domain-specific Components"
+}
+
+package "Extension Distribution" {
+    database NexusRepo as "Maven Repository"
+    component GitHubReleases as "GitHub Releases"
+    component DockerImages as "Container Images"
+    component MarketPlace as "Extension Marketplace"
+}
+
+ExtRegistry --> ClassLoader
+ClassLoader --> APILayer
+APILayer --> Lifecycle
+
+Lifecycle --> Processors
+Lifecycle --> ControllerServices
+Lifecycle --> ReportingTasks
+Lifecycle --> Authorizers
+Lifecycle --> LoginProviders
+
+Processors --> NARFile
+ControllerServices --> NARFile
+NARFile --> Dependencies
+NARFile --> ServiceDef
+NARFile --> Documentation
+
+Archetypes --> DevFramework
+DevFramework --> TestFramework
+TestFramework --> DocGeneration
+
+DevFramework --> CustomProc
+DevFramework --> CustomServices
+DevFramework --> ThirdPartyInteg
+DevFramework --> DomainSpecific
+
+CustomProc --> NexusRepo
+CustomServices --> GitHubReleases
+ThirdPartyInteg --> DockerImages
+DomainSpecific --> MarketPlace
+@enduml
+....
+
+=== Extension Development
+
+**NAR Packaging**:: Self-contained archives with dependencies and metadata.
+
+**API Abstraction**:: Clean interfaces for extending NiFi functionality.
+
+**Development Tools**:: Maven archetypes and frameworks for rapid development.
+
+**Testing Support**:: Comprehensive testing frameworks for extension validation.
+
+== Deployment Architecture
+
+NiFi supports various deployment patterns for different operational requirements.
+
+[plantuml, deployment-architecture, svg]
+....
+@startuml
+package "Deployment Patterns" {
+    package "Standalone Deployment" {
+        component SingleNode as "Single NiFi Node"
+        database LocalStorage as "Local Storage"
+        component LocalConfig as "Local Configuration"
+    }
+    
+    package "Clustered Deployment" {
+        component MultiNode as "Multiple NiFi Nodes"
+        database SharedStorage as "Shared Storage"
+        component LoadBalancer as "Load Balancer"
+        component ZooKeeper as "ZooKeeper Ensemble"
+    }
+    
+    package "Cloud Deployment" {
+        component K8s as "Kubernetes Cluster"
+        component Helm as "Helm Charts"
+        component AutoScaling as "Auto Scaling"
+        database CloudStorage as "Cloud Storage"
+        component ServiceMesh as "Service Mesh"
+    }
+    
+    package "Edge Deployment" {
+        component EdgeNodes as "Edge Computing Nodes"
+        component MiNiFiAgents as "MiNiFi Agents"
+        database EdgeStorage as "Edge Storage"
+        component OfflineCapability as "Offline Capability"
+    }
+}
+
+package "Infrastructure Components" {
+    package "Compute" {
+        component VMs as "Virtual Machines"
+        component Containers as "Container Runtime"
+        component Serverless as "Serverless Functions"
+    }
+    
+    package "Storage" {
+        database BlockStorage as "Block Storage"
+        database ObjectStorage as "Object Storage"
+        database FileSystem as "Distributed File System"
+    }
+    
+    package "Networking" {
+        cloud VPC as "Virtual Private Cloud"
+        component Subnets as "Private Subnets"
+        component SecurityGroups as "Security Groups"
+        component CDN as "Content Delivery Network"
+    }
+    
+    package "Monitoring & Ops" {
+        component Prometheus as "Prometheus"
+        component Grafana as "Grafana"
+        component ELK as "ELK Stack"
+        component APM as "Application Performance Monitoring"
+    }
+}
+
+SingleNode --> LocalStorage
+SingleNode --> LocalConfig
+
+MultiNode --> SharedStorage
+MultiNode --> LoadBalancer
+MultiNode --> ZooKeeper
+
+K8s --> Helm
+K8s --> AutoScaling
+K8s --> CloudStorage
+K8s --> ServiceMesh
+
+EdgeNodes --> MiNiFiAgents
+EdgeNodes --> EdgeStorage
+EdgeNodes --> OfflineCapability
+
+SingleNode --> VMs
+MultiNode --> VMs
+K8s --> Containers
+EdgeNodes --> Containers
+
+SharedStorage --> BlockStorage
+CloudStorage --> ObjectStorage
+EdgeStorage --> FileSystem
+
+LoadBalancer --> VPC
+VPC --> Subnets
+Subnets --> SecurityGroups
+
+MultiNode --> Prometheus
+Prometheus --> Grafana
+K8s --> ELK
+EdgeNodes --> APM
+@enduml
+....
+
+=== Deployment Considerations
+
+**Scalability Requirements**:: Choose deployment pattern based on throughput and availability needs.
+
+**Infrastructure Integration**:: Leverage existing infrastructure and cloud services.
+
+**Operational Complexity**:: Balance features with operational overhead and complexity.
+
+**Edge Computing**:: Deploy processing capabilities close to data sources for reduced latency.
+
+== Conclusion
+
+Apache NiFi's technical architecture provides a robust, scalable, and secure platform for data flow management. The modular design enables flexible deployment patterns while maintaining strong security and operational capabilities. Understanding these architectural patterns is essential for designing effective data flow solutions and operational deployments.
+
+For more detailed information on specific architectural components, refer to the individual component documentation and implementation guides.
